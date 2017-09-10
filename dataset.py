@@ -9,7 +9,6 @@ class DataSet(object):
 
 	def __init__(self, images, labels):
 		self._num_examples = images.shape[0]
-
 		self._images = images
 		self._labels = labels
 		self._epochs_done = 0

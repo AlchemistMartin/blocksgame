@@ -1,6 +1,7 @@
 # -*- coding: utf8 -*-
 import numpy as np
 import json
+import tensorflow as tf
 
 
 def pad20(tar_arr):
@@ -64,10 +65,10 @@ def move2str(move):
 	y1 = np.nonzero(move)[1]
 	grids = []
 	for i in range(0, x1.__len__()):
-		fig = 20 - x1[i]
+		fig = 19 - x1[i]
 		al = alpha[y1[i]]
 		grids.append(al + str(fig))
-	return grids
+	return ','.join(grids)
 
 
 def str2move(move_str):
@@ -76,7 +77,7 @@ def str2move(move_str):
 	if move_str != '':
 		moves = move_str.split(',')
 		for grid in moves:
-			x_ = 20 - int(grid[1:])
+			x_ = 19 - int(grid[1:])
 			y_ = alpha.index(grid[0])
 			move[x_, y_] = 1
 	return move
@@ -133,10 +134,11 @@ def legit(state, move):
 			legal['msg'] += 'Wrong Position；'
 	# 是不是盒中的子
 	shape = get_piece(move)
-	box = state['cur_box']
-	if box[shape].sum() == 0:
-		legal['val'] = False
-		legal['msg'] += 'Not in box；'
+	if shape:
+		box = state['cur_box']
+		if box[shape].sum() == 0:
+			legal['val'] = False
+			legal['msg'] += 'Not in box；'
 	# 有没有地方放
 	all_plane = state['overall']
 	if (all_plane + move).max() > 1:
@@ -147,6 +149,7 @@ def legit(state, move):
 
 def ini_game():
 	state = dict()
+	state['cur_user'] = 0
 	state['planes'] = [np.zeros((20, 20)), np.zeros((20, 20)), np.zeros((20, 20)), np.zeros((20, 20))]
 	state['overall'] = np.zeros((20, 20))
 	state['cur_plane'] = np.zeros((20, 20))
@@ -165,6 +168,7 @@ def update_game(state, user, move):
 	new_state = state.copy()
 	user_dict = {0: [1, 2, 3, 0], 1: [2, 3, 0, 1], 2: [3, 0, 1, 2], 3: [0, 1, 2, 3]}
 	# move有效时加move，否则只更新用户
+	new_state['cur_user'] = (user < 3) * (user + 1)
 	new_state['overall'] = state['overall'] + move
 	new_state['planes'][user] += move
 	shape = get_piece(move)
@@ -180,8 +184,86 @@ def update_game(state, user, move):
 	return new_state
 
 
+def get_move(state):
+	all_plane = state['overall']
+	cur_plane = state['cur_plane']
+	nxt_plane = state['nxt_plane']
+	ali_plane = state['ali_plane']
+	pre_plane = state['pre_plane']
+	cur_box = state['cur_box']
+	nxt_box = state['nxt_box']
+	ali_box = state['ali_box']
+	pre_box = state['pre_box']
+	cur_x = np.array([all_plane, cur_plane, nxt_plane, ali_plane, pre_plane] + cur_box)
+	x_array = np.array([cur_x])
+	x_ = x_array.reshape(x_array.shape[0], x_array.shape[2], x_array.shape[3], x_array.shape[1])
+
+	sess = tf.Session()
+	saver = tf.train.import_meta_graph('test-model.meta')
+	saver.restore(sess, tf.train.latest_checkpoint('./'))
+	graph = tf.get_default_graph()
+	y_pred = graph.get_tensor_by_name("y_pred:0")
+	x = graph.get_tensor_by_name("x:0")
+	result = sess.run(y_pred, feed_dict={x: x_})
+	result = (result > 0.5).reshape(20, 20)
+	return result
 
 
+def score_board(state):
+	score0 = state['planes'][0].sum()
+	score1 = state['planes'][0].sum()
+	score2 = state['planes'][0].sum()
+	score3 = state['planes'][0].sum()
+	score02 = score0 + score2
+	score13 = score1 + score3
+	winner = '02'
+	lead = score02 - score13
+	if score13 > score02:
+		winner = '13'
+		lead *= -1
+	msg = "team02: {0}; team13: {1}; Players: {2}; {3}; {4}; {5}, team{6} lead by {7}"
+	msg.format(score02, score13, score0, score1, score2, score3, winner, lead)
+	result = {'msg': msg}
+	return result
+
+
+def game_on():
+	state = ini_game()
+	teams = {0: 'ai', 1: 'ptb', 2: 'ai', 3: 'ptb'}
+	skip = 0
+	while skip < 4:
+		cur_user = state['cur_user']
+		if teams[cur_user] == 'ai':
+			move_tmp = get_move(state)
+			legal = legit(state, move_tmp)
+			print move_tmp
+			print legal['msg']
+			move_tmp_str = move2str(move_tmp) + '(y/n)?:'
+			review = raw_input(move_tmp_str)
+			if review == '':
+				move = np.zeros((20, 20))
+				skip += 1
+			elif review == 'y':
+				move = move_tmp
+				skip = 0
+			else:
+				move = str2move(review)
+				skip = 0
+			state = update_game(state, cur_user, move)
+		else:
+			move_str = raw_input("ptb move str:")
+			if move_str == '':
+				move = np.zeros((20, 20))
+				skip += 1
+			else:
+				move = str2move(move_str)
+				print(move)
+				skip = 0
+			state = update_game(state, cur_user, move)
+		print(score_board(state)['msg'])
+	print 'game over'
+
+game_on()
 
 # with open('test.json') as tef:
 # 	te = tef.read()
